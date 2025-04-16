@@ -2,6 +2,9 @@
 #include <unistd.h>
 #include <pigpio.h>
 
+
+#define MOT_SPEED  128
+
 int main(int argc, char *argv[])
 {
         char c;
@@ -36,14 +39,14 @@ int main(int argc, char *argv[])
                 if  (c == 'f'){
                         gpioWrite(MDIR1, 0);
                         gpioWrite(MDIR2, 1);
-                        gpioPWM(MPWM1, 64);
-                        gpioPWM(MPWM2, 64);
+                        gpioPWM(MPWM1, MOT_SPEED);
+                        gpioPWM(MPWM2, MOT_SPEED);
                 }
                 else if (c == 'b'){
                         gpioWrite(MDIR1, 1);
                         gpioWrite(MDIR2, 0);
-                        gpioPWM(MPWM1, 64);
-                        gpioPWM(MPWM2, 64);
+                        gpioPWM(MPWM1, MOT_SPEED);
+                        gpioPWM(MPWM2, MOT_SPEED);
 
                 }
                 else if (c == 's'){
