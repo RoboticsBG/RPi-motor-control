@@ -1,8 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include <pigpio.h>
 #include "rotary_encoder.h"
-
 
 #define MOT_SPEED_L  	300
 #define MOT_SPEED_R  	300
@@ -22,14 +23,18 @@ struct pi_motors
 	uint16_t pwm_L;
 	uint16_t pwm_R;
 	int target_s;
-
 };
 
 int MPWM_L=12;
 int MPWM_R=13;
-
+int MDIR_L=24;
+int MDIR_R=25;
+int MEN=5;
 
 struct pi_motors pi_mot;
+
+void set_lspeed(int spd);
+void set_rspeed(int spd);
 
 void set_pwm_L(uint16_t pwm)
 {
@@ -66,9 +71,9 @@ void callback_L(int way, uint32_t td)
 
 	if (upd == 1){
 		pi_mot.pos_L += dir;
-		pi_mot.speed_L = 60*1000000/td_sum;
+		pi_mot.speed_L = 60*1000000/td_sum*dir;
    		//printf("L:%d\n", pi_mot.speed_L);
-   		printf("\rLS:%d RS:%d L:%d R:%d", 
+   		printf("\rLS:%d|RS:%d|L:%d|R:%d ", 
 			pi_mot.speed_L, pi_mot.speed_R, pi_mot.pos_L,pi_mot.pos_R);
 		fflush(stdout);
 		td_sum = 0;
@@ -106,7 +111,7 @@ void callback_R(int way, uint32_t td)
 
         if (upd == 1){
                 pi_mot.pos_R += dir;
-                pi_mot.speed_R = 60*1000000/td_sum;
+                pi_mot.speed_R = 60*1000000/td_sum*dir;
                 //printf("\rR:%d", pi_mot.pos_R);
 		//fflush(stdout);
 		//printf("R:%d\n", pi_mot.speed_R);
@@ -126,10 +131,9 @@ void callback_R(int way, uint32_t td)
 int main(int argc, char *argv[])
 {
         char c;
+	char buffer[128];
+	int val;
 
-        int MDIR_L=24;
-        int MDIR_R=25;
-        int MEN=5;
 
 	int gpioA_L = 17;
 	int gpioB_L = 18;
@@ -169,47 +173,17 @@ int main(int argc, char *argv[])
 
 
         while(1){
-                c  = getchar();
+                fgets(buffer, sizeof(buffer), stdin);
+		buffer[strcspn(buffer, "\n")] = 0; 
+		c = buffer[0];
+		val = atoi(&buffer[1]);
 
-                if  (c == 'f'){
-                        gpioWrite(MDIR_L, FWD);
-                        gpioWrite(MDIR_R, FWD);
-			set_pwm_L(pi_mot.pwm_L);
-			set_pwm_R(pi_mot.pwm_R);
-                        //gpioPWM(MPWM_L, pi_mot.pwm_L);
-                        //gpioPWM(MPWM_R, pi_mot.pwm_R);
+                if  (c == 'm'){
+			set_lspeed(val);
                 }
-                else if (c == 'b'){
-                        gpioWrite(MDIR_L, BACK);
-                        gpioWrite(MDIR_R, BACK);
-                        set_pwm_L(pi_mot.pwm_L);
-			set_pwm_R(pi_mot.pwm_R);
 
-
-                }
-		else if (c == 'l'){
-			pi_mot.pwm_R++;
-			set_pwm_R(pi_mot.pwm_R);
-		        //printf("%d\n", pi_mot.pwm_R);
-
-
-
-                      /*  gpioWrite(MDIR_L, BACK);
-                        gpioWrite(MDIR_R, FWD);
-                        gpioPWM(MPWM_L, MOT_SPEED_L);
-                        gpioPWM(MPWM_R, MOT_SPEED_L); */
-
-                }
- 		else if (c == 'r'){
-			pi_mot.pwm_R--;
-			set_pwm_R(pi_mot.pwm_R);
-
-			//printf("%d\n", pi_mot.pwm_R);
-
-                       /* gpioWrite(MDIR_L, FWD);
-                        gpioWrite(MDIR_R, BACK);
-                        gpioPWM(MPWM_L, MOT_SPEED_L);
-                        gpioPWM(MPWM_R, MOT_SPEED_L); */
+		else if (c == 'r'){
+			set_rspeed(val);
 
                 }
 
@@ -227,4 +201,41 @@ int main(int argc, char *argv[])
 	Pi_Renc_cancel(renc2);
 
         gpioTerminate();
+}
+
+
+void set_lspeed(int spd)
+{
+	if (spd>=0){
+
+		gpioWrite(MDIR_L, FWD);
+        	gpioWrite(MDIR_R, FWD);
+		set_pwm_L(spd);
+		set_pwm_R(spd);
+	}
+	else{
+		gpioWrite(MDIR_L, BACK);
+        	gpioWrite(MDIR_R, BACK);
+		set_pwm_L(abs(spd));
+		set_pwm_R(abs(spd));
+
+	}
+}
+
+void set_rspeed(int spd)
+{
+        if (spd>=0){
+
+                gpioWrite(MDIR_L, BACK);
+                gpioWrite(MDIR_R, FWD);
+                set_pwm_L(spd);
+                set_pwm_R(spd);
+        }
+        else{
+                gpioWrite(MDIR_L, FWD);
+                gpioWrite(MDIR_R, BACK);
+                set_pwm_L(abs(spd));
+                set_pwm_R(abs(spd));
+
+        }
 }
