@@ -4,6 +4,7 @@
 #include <string.h>
 #include <pigpio.h>
 #include "rotary_encoder.h"
+#include "udp_sender.h"
 
 #define MOT_SPEED_L  	300
 #define MOT_SPEED_R  	300
@@ -55,6 +56,7 @@ void callback_L(int way, uint32_t td)
 	static int div = 0;
 	static uint32_t td_sum = 0;
 	int upd = 0, dir;
+	char str[32];
 
 	dir = way*-1;
 	div += dir;
@@ -73,8 +75,10 @@ void callback_L(int way, uint32_t td)
 		pi_mot.pos_L += dir;
 		pi_mot.speed_L = 60*1000000/td_sum*dir;
    		//printf("L:%d\n", pi_mot.speed_L);
-   		printf("\rLS:%d|RS:%d|L:%d|R:%d ", 
+   		sprintf(str,"\rLS:%d|RS:%d|L:%d|R:%d ", 
 			pi_mot.speed_L, pi_mot.speed_R, pi_mot.pos_L,pi_mot.pos_R);
+		send_udp_data(str);
+		printf("%s",str);
 		fflush(stdout);
 		td_sum = 0;
 
@@ -132,7 +136,7 @@ int main(int argc, char *argv[])
 {
         char c;
 	char buffer[128];
-	int val;
+	int val,ret;
 
 
 	int gpioA_L = 17;
@@ -142,6 +146,10 @@ int main(int argc, char *argv[])
 
 
  	Pi_Renc_t *renc1, *renc2;
+
+	if (init_udp_sender() < 0){
+		return 1;
+	}
 
 
         if (gpioInitialise() < 0)
@@ -171,7 +179,6 @@ int main(int argc, char *argv[])
 	renc1 = Pi_Renc(gpioA_L, gpioB_L, callback_L);
 	renc2 = Pi_Renc(gpioA_R, gpioB_R, callback_R);
 
-
         while(1){
                 fgets(buffer, sizeof(buffer), stdin);
 		buffer[strcspn(buffer, "\n")] = 0; 
@@ -197,6 +204,8 @@ int main(int argc, char *argv[])
                 }
 
         }
+	
+	close_udp_sender();
 	Pi_Renc_cancel(renc1);
 	Pi_Renc_cancel(renc2);
 
