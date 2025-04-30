@@ -150,11 +150,13 @@ int main(int argc, char *argv[])
 	int val,ret;
 
 
-
-
  	Pi_Renc_t *renc1, *renc2;
 
 	if (init_udp_sender() < 0){
+		return 1;
+	}
+
+	if (init_udp_listener() < 0){
 		return 1;
 	}
 
@@ -187,8 +189,9 @@ int main(int argc, char *argv[])
 	renc2 = Pi_Renc(gpioA_R, gpioB_R, callback_R);
 
         while(1){
-                fgets(buffer, sizeof(buffer), stdin);
-		buffer[strcspn(buffer, "\n")] = 0; 
+                //fgets(buffer, sizeof(buffer), stdin);
+		//buffer[strcspn(buffer, "\n")] = 0; 
+		wait_cmd(buffer);
 		c = buffer[0];
 		val = atoi(&buffer[1]);
 
@@ -206,12 +209,14 @@ int main(int argc, char *argv[])
 		}
                 else if (c == 'x'){
 
-                        break;
+                        //break;
+			continue;
                 }
 
         }
 
 	close_udp_sender();
+	close_udp_listener();
 	Pi_Renc_cancel(renc1);
 	Pi_Renc_cancel(renc2);
 

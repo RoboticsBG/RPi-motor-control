@@ -6,12 +6,44 @@
 #include <netinet/in.h>
 
 #define PORT 8080
+#define PORT2 8081
+#define BUFFER_SIZE 1024
 #define BROADCAST_INTERVAL 1  // seconds
 #define MESSAGE "Hello from UDP broadcast sender!"
 
 
-static int sockfd;
+static int sockfd, sockfd2;
 static struct sockaddr_in bcastaddr;
+static struct sockaddr_in listenaddr;
+static char buffer[BUFFER_SIZE];
+
+
+
+int init_udp_listener()
+{
+	// 1. Create UDP socket
+    	if ((sockfd2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        	perror("Socket creation failed");
+        	exit(EXIT_FAILURE);
+    	}
+
+	// 3. Prepare address to bind to
+    	memset(&listenaddr, 0, sizeof(listenaddr));
+    	listenaddr.sin_family = AF_INET;
+    	listenaddr.sin_addr.s_addr = INADDR_ANY;  // Listen on all interfaces
+    	listenaddr.sin_port = htons(PORT2);
+
+    	// 4. Bind socket
+    	if (bind(sockfd2, (struct sockaddr *)&listenaddr, sizeof(listenaddr)) < 0) {
+        	perror("Bind failed");
+        	close(sockfd2);
+        	exit(EXIT_FAILURE);
+    	}
+
+	printf("Motor control ready to accept commands on port %d...\n", PORT2);
+
+	return 0;
+}
 
 
 int init_udp_sender()
@@ -38,7 +70,6 @@ int init_udp_sender()
     bcastaddr.sin_port = htons(PORT);
     bcastaddr.sin_addr.s_addr = inet_addr("10.10.50.255");  // or your subnet's broadcast IP like 192.168.1.255
 
-   printf("UDP sender ready on port %d...\n", PORT);
 
 
     return 0;
@@ -59,8 +90,34 @@ int send_udp_data(char *pstr)
 	return 0;
 }
 
+
+int wait_cmd(char *pcmd)
+{
+	while (1) {
+        	socklen_t addrlen = sizeof(listenaddr);
+        	ssize_t n = recvfrom(sockfd2, buffer, BUFFER_SIZE - 1, 0,
+                             (struct sockaddr *)&listenaddr, &addrlen);
+        	if (n < 0) {
+           	 	perror("recvfrom failed");
+            		continue;
+        	}
+
+        	buffer[n] = '\0';  // Null-terminate the string
+        	//printf("%s\n", buffer);
+		strcpy(pcmd, buffer);
+		return 0;
+    	}
+	return 0;
+}
+
 void close_udp_sender()
 {
 	close(sockfd);
+
+}
+
+void close_udp_listener()
+{
+	close(sockfd2);
 
 }
