@@ -16,6 +16,10 @@
 
 #define MDIV		11
 #define K_SPD		0.222F
+#define K_WHEEL		0.262F
+#define L_WHEEL		20.45F
+#define K_FSPD		0.0002134F
+
 
 struct pi_motors
 {
@@ -23,6 +27,8 @@ struct pi_motors
 	int c_speed;
 	int t_speed;
 	uint16_t pwm;
+	float f_speed;
+	float f_dist;
 };
 
 int MPWM_L=12;
@@ -30,6 +36,12 @@ int MPWM_R=13;
 int MDIR_L=24;
 int MDIR_R=25;
 int MEN=5;
+
+int gpioA_L = 17;
+int gpioB_L = 18;
+int gpioA_R = 22;
+int gpioB_R = 23;
+
 
 struct pi_motors pi_motL, pi_motR;
 
@@ -61,7 +73,7 @@ void callback_L(int way, uint32_t td)
 	static int div = 0;
 	static uint32_t td_sum = 0;
 	int upd = 0, dir;
-	char str[32];
+	char str[64];
 
 	dir = way*-1;
 	div += dir;
@@ -80,8 +92,10 @@ void callback_L(int way, uint32_t td)
 		pi_motL.pos += dir;
 		pi_motL.c_speed = 60*1000000/td_sum*dir;
    		//printf("L:%d\n", pi_mot.speed_L);
-   		sprintf(str,"\rLS:%d|RS:%d|L:%d|R:%d ", 
-			pi_motL.c_speed, pi_motR.c_speed, pi_motL.pos,pi_motR.pos);
+		pi_motL.f_dist = pi_motL.pos* K_WHEEL;
+		pi_motL.f_speed = pi_motL.c_speed*(K_FSPD*L_WHEEL);
+   		sprintf(str,"\rLS:%.1f|RS:%.1f|L:%.1f|R:%.1f ",
+			pi_motL.f_speed, pi_motR.f_speed, pi_motL.f_dist,pi_motR.f_dist);
 		send_udp_data(str);
 		printf("%s",str);
 		fflush(stdout);
@@ -116,15 +130,13 @@ void callback_R(int way, uint32_t td)
         if (upd == 1){
                 pi_motR.pos += dir;
                 pi_motR.c_speed = 60*1000000/td_sum*dir;
-                //printf("\rR:%d", pi_mot.pos_R);
-		//fflush(stdout);
-		//printf("R:%d\n", pi_mot.speed_R);
-                td_sum = 0;
+                pi_motR.f_dist = pi_motR.pos* K_WHEEL;
+                pi_motR.f_speed = pi_motR.c_speed*(K_FSPD*L_WHEEL);
+
+		td_sum = 0;
 
 		pi_motR.pwm = adj_pwm(&pi_motR);
 		set_pwm_R(pi_motR.pwm);
-
-
         }
 }
 
@@ -138,10 +150,6 @@ int main(int argc, char *argv[])
 	int val,ret;
 
 
-	int gpioA_L = 17;
-	int gpioB_L = 18;
-	int gpioA_R = 20;
-	int gpioB_R = 21;
 
 
  	Pi_Renc_t *renc1, *renc2;
