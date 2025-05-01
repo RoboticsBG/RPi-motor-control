@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <pigpio.h>
+#include <sys/epoll.h>
 #include "rotary_encoder.h"
 #include "udp_sender.h"
 
@@ -20,6 +21,7 @@
 #define L_WHEEL		20.45F
 #define K_FSPD		0.0002134F
 
+#define MAX_EVENTS	16
 
 struct pi_motors
 {
@@ -49,6 +51,10 @@ void set_lspeed(int spd);
 void set_aspeed(int spd);
 
 uint16_t adj_pwm(struct pi_motors *pm);
+
+int listen_rx();
+void event_tick();
+int proc_data(char *pcmd);
 
 
 void set_pwm_L(uint16_t pwm)
@@ -145,10 +151,7 @@ void callback_R(int way, uint32_t td)
 
 int main(int argc, char *argv[])
 {
-        char c;
-	char buffer[128];
-	int val,ret;
-
+	int ret;
 
  	Pi_Renc_t *renc1, *renc2;
 
@@ -191,9 +194,92 @@ int main(int argc, char *argv[])
         while(1){
                 //fgets(buffer, sizeof(buffer), stdin);
 		//buffer[strcspn(buffer, "\n")] = 0; 
-		wait_cmd(buffer);
-		c = buffer[0];
-		val = atoi(&buffer[1]);
+		//wait_cmd(buffer);
+		listen_rx();
+		continue;
+
+        }
+
+	close_udp_sender();
+	close_udp_listener();
+	Pi_Renc_cancel(renc1);
+	Pi_Renc_cancel(renc2);
+
+        gpioTerminate();
+}
+
+
+/**
+ * @brief  The primary function that listens on CAN sockets.
+ * @retval  ret 
+ */
+int listen_rx()
+{
+        int running = 1;
+        int event_count;
+        int  fd_epoll;
+        int i, ret;
+        struct epoll_event event_setup[2], events[MAX_EVENTS];
+
+	char buffer[128];
+
+        fd_epoll = epoll_create(1);
+        if (fd_epoll < 0) {
+                perror("epoll_create");
+                return 1;
+        }
+
+        event_setup[0].events = EPOLLIN;
+        event_setup[0].data.fd = sockfd2;
+
+
+        if (epoll_ctl(fd_epoll, EPOLL_CTL_ADD, sockfd2, &event_setup[0])) {
+                perror("failed to add socket s0 to epoll");
+                return 1;
+        }
+
+
+ 	while(running){
+                event_count = epoll_wait(fd_epoll, events, MAX_EVENTS, 1000);
+                //printf("%d ready events\n", event_count);
+                if (event_count < 0){
+                        running = 0;
+                        continue;
+                }
+                if (event_count == 0){
+                        event_tick();
+                        continue;
+                }
+                for(i = 0; i < event_count; i++){
+
+
+                        if (events[i].data.fd == sockfd2) {
+				ret = recv_data(buffer);
+				if (ret != 0){
+					continue;
+				}
+				proc_data(buffer);
+                }
+            }
+
+        }
+
+        return 0;
+}
+
+
+void event_tick()
+{
+        //printf("1000ms tick\n");
+}
+
+int proc_data(char *pcmd)
+{
+	char c;
+	int val;
+
+		c = *pcmd++;
+		val = atoi(pcmd);
 
                 if  (c == 'm'){
 			set_lspeed(val);
@@ -207,21 +293,9 @@ int main(int argc, char *argv[])
                 else if (c == 's'){
                 	set_lspeed(0);
 		}
-                else if (c == 'x'){
-
-                        //break;
-			continue;
-                }
-
-        }
-
-	close_udp_sender();
-	close_udp_listener();
-	Pi_Renc_cancel(renc1);
-	Pi_Renc_cancel(renc2);
-
-        gpioTerminate();
+	return 0;
 }
+
 
 uint16_t adj_pwm(struct pi_motors *pm)
 {

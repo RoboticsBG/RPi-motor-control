@@ -4,6 +4,7 @@
 #include <unistd.h>          // for sleep()
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/epoll.h>
 
 #define PORT 8080
 #define PORT2 8081
@@ -11,18 +12,21 @@
 #define BROADCAST_INTERVAL 1  // seconds
 #define MESSAGE "Hello from UDP broadcast sender!"
 
+#define MAX_EVENTS	16
 
-static int sockfd, sockfd2;
+
+int sockfd, sockfd2;
 static struct sockaddr_in bcastaddr;
 static struct sockaddr_in listenaddr;
 static char buffer[BUFFER_SIZE];
 
 
+void event_tick();
 
 int init_udp_listener()
 {
 	// 1. Create UDP socket
-    	if ((sockfd2 = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    	if ((sockfd2 = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0)) < 0) {
         	perror("Socket creation failed");
         	exit(EXIT_FAILURE);
     	}
@@ -109,6 +113,23 @@ int wait_cmd(char *pcmd)
     	}
 	return 0;
 }
+
+int recv_data(char *pcmd)
+{
+	struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        ssize_t len = recvfrom(sockfd2, buffer, BUFFER_SIZE - 1, 0,
+        	(struct sockaddr *)&client_addr, &client_len);
+       if (len > 0) {
+
+        	buffer[len] = '\0';  // Null-terminate the string
+        	//printf("%s\n", buffer);
+		strcpy(pcmd, buffer);
+		return 0;
+	}
+	return 1;
+}
+
 
 void close_udp_sender()
 {
