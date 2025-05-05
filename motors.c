@@ -4,6 +4,7 @@
 #include <string.h>
 #include <pigpio.h>
 #include <sys/epoll.h>
+#include <sys/timerfd.h>
 #include "rotary_encoder.h"
 #include "udp_sender.h"
 
@@ -22,6 +23,8 @@
 #define K_FSPD		0.0002134F
 
 #define MAX_EVENTS	16
+#define TOUT1		200
+#define MOT_TOUT	5
 
 struct pi_motors
 {
@@ -32,6 +35,9 @@ struct pi_motors
 	float f_speed;
 	float f_dist;
 };
+
+int motor_run = 0;
+int motor_timer = 0;
 
 int MPWM_L=12;
 int MPWM_R=13;
@@ -55,6 +61,7 @@ uint16_t adj_pwm(struct pi_motors *pm);
 int listen_rx();
 void event_tick();
 int proc_data(char *pcmd);
+int create_timerfd(int interval_ms);
 
 
 void set_pwm_L(uint16_t pwm)
@@ -79,7 +86,6 @@ void callback_L(int way, uint32_t td)
 	static int div = 0;
 	static uint32_t td_sum = 0;
 	int upd = 0, dir;
-	char str[64];
 
 	dir = way*-1;
 	div += dir;
@@ -100,10 +106,9 @@ void callback_L(int way, uint32_t td)
    		//printf("L:%d\n", pi_mot.speed_L);
 		pi_motL.f_dist = pi_motL.pos* K_WHEEL;
 		pi_motL.f_speed = pi_motL.c_speed*(K_FSPD*L_WHEEL);
-   		sprintf(str,"\rLS:%.1f|RS:%.1f|L:%.1f|R:%.1f ",
-			pi_motL.f_speed, pi_motR.f_speed, pi_motL.f_dist,pi_motR.f_dist);
-		send_udp_data(str);
-		printf("%s",str);
+   		//sprintf(str,"\rLS:%.1f|RS:%.1f|L:%.1f|R:%.1f ",
+		//	pi_motL.f_speed, pi_motR.f_speed, pi_motL.f_dist,pi_motR.f_dist);
+		//send_udp_data(str);
 		fflush(stdout);
 		td_sum = 0;
 
@@ -219,14 +224,21 @@ int listen_rx()
         int event_count;
         int  fd_epoll;
         int i, ret;
-        struct epoll_event event_setup[2], events[MAX_EVENTS];
+        int tfd;
+	uint64_t expirations;
+	struct epoll_event event_setup[2], events[MAX_EVENTS];
 
 	char buffer[128];
+
+	tfd = create_timerfd(100);  // fire every  100ms
+	if (tfd < 0)
+		return -1;
+
 
         fd_epoll = epoll_create(1);
         if (fd_epoll < 0) {
                 perror("epoll_create");
-                return 1;
+                return -2;
         }
 
         event_setup[0].events = EPOLLIN;
@@ -234,43 +246,76 @@ int listen_rx()
 
 
         if (epoll_ctl(fd_epoll, EPOLL_CTL_ADD, sockfd2, &event_setup[0])) {
-                perror("failed to add socket s0 to epoll");
-                return 1;
+                perror("failed to add UDP listen socket to epoll");
+                return -3;
         }
 
+	event_setup[1].events = EPOLLIN;
+        event_setup[1].data.fd = tfd;
+
+        if (epoll_ctl(fd_epoll, EPOLL_CTL_ADD, tfd, &event_setup[1])) {
+                perror("failed to add timerfd to epoll");
+                return -4;
+        }
 
  	while(running){
-                event_count = epoll_wait(fd_epoll, events, MAX_EVENTS, 1000);
+                event_count = epoll_wait(fd_epoll, events, MAX_EVENTS, -1);
                 //printf("%d ready events\n", event_count);
                 if (event_count < 0){
                         running = 0;
                         continue;
                 }
-                if (event_count == 0){
-                        event_tick();
-                        continue;
-                }
                 for(i = 0; i < event_count; i++){
 
-
-                        if (events[i].data.fd == sockfd2) {
+             		if (events[i].data.fd == sockfd2) {
 				ret = recv_data(buffer);
 				if (ret != 0){
 					continue;
 				}
 				proc_data(buffer);
-                }
-            }
+                	}
+		        if (events[i].data.fd == tfd) {
+                		read(tfd, &expirations, sizeof(expirations)); 
+				event_tick();
+                	}
+		}
 
         }
-
         return 0;
+}
+
+
+void send_mot_data()
+{
+	char str[64];
+	static int cnt;
+
+	sprintf(str,"T:%d|LS:%.1f|RS:%.1f|L:%.1f|R:%.1f",
+		cnt,pi_motL.f_speed, pi_motR.f_speed, pi_motL.f_dist,pi_motR.f_dist);
+        send_udp_data(str);
+	//printf("%s",str);
+	cnt ++;
+	if (cnt >= 100)
+		cnt = 0;
+
 }
 
 
 void event_tick()
 {
-        //printf("1000ms tick\n");
+        if (motor_timer != 0){
+		motor_timer --;
+		if (motor_timer == 0){
+			set_lspeed(0);
+		}
+	}
+	else{
+		pi_motR.f_speed =0.0;
+		pi_motL.f_speed =0.0;
+
+	}
+	send_mot_data();
+	//printf("1000ms tick\n");
 }
 
 int proc_data(char *pcmd)
@@ -283,10 +328,12 @@ int proc_data(char *pcmd)
 
                 if  (c == 'm'){
 			set_lspeed(val);
+			motor_timer = MOT_TOUT;
                 }
 
 		else if (c == 'r'){
 			set_aspeed(val);
+			motor_timer = MOT_TOUT;
 
                 }
 
@@ -296,6 +343,32 @@ int proc_data(char *pcmd)
 	return 0;
 }
 
+
+
+int create_timerfd(int interval_ms) 
+{
+
+	struct itimerspec ts;
+	int tfd;
+
+	tfd = timerfd_create(CLOCK_MONOTONIC, 0);
+    	if (tfd == -1) {
+        	perror("timerfd_create");
+		return -1;
+    	}
+
+    	ts.it_value.tv_sec = interval_ms / 1000;
+    	ts.it_value.tv_nsec = (interval_ms % 1000) * 1000000;
+    	ts.it_interval.tv_sec = interval_ms / 1000;
+   	 ts.it_interval.tv_nsec = (interval_ms % 1000) * 1000000;
+
+    	if (timerfd_settime(tfd, 0, &ts, NULL) == -1) {
+        	perror("timerfd_settime");
+		return -1;
+    	}
+
+    	return tfd;
+}
 
 uint16_t adj_pwm(struct pi_motors *pm)
 {
