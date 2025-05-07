@@ -429,6 +429,8 @@ void set_lspeed(int spd)
 
 void set_aspeed(int spd)
 {
+ 	if (spd == pi_motL.t_speed)
+                return;
 
 	 pi_motL.pwm =(uint16_t)(abs(spd)*K_SPD);
 	 pi_motR.pwm =(uint16_t)(abs(spd)*K_SPD);
