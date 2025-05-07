@@ -5,6 +5,7 @@
 #include <pigpio.h>
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
+#include <signal.h>
 #include "rotary_encoder.h"
 #include "udp_sender.h"
 
@@ -52,6 +53,17 @@ int gpioB_R = 23;
 
 
 struct pi_motors pi_motL, pi_motR;
+
+volatile sig_atomic_t running = 1;
+
+void handle_sigint(int signum) 
+{
+	//printf("\nCaught signal %d, exiting cleanly...\n", signum);
+    	running = 0;
+
+}
+
+
 
 void set_lspeed(int spd);
 void set_aspeed(int spd);
@@ -109,7 +121,7 @@ void callback_L(int way, uint32_t td)
    		//sprintf(str,"\rLS:%.1f|RS:%.1f|L:%.1f|R:%.1f ",
 		//	pi_motL.f_speed, pi_motR.f_speed, pi_motL.f_dist,pi_motR.f_dist);
 		//send_udp_data(str);
-		fflush(stdout);
+		//fflush(stdout);
 		td_sum = 0;
 
 		pi_motL.pwm = adj_pwm(&pi_motL);
@@ -160,6 +172,7 @@ int main(int argc, char *argv[])
 
  	Pi_Renc_t *renc1, *renc2;
 
+
 	if (init_udp_sender() < 0){
 		return 1;
 	}
@@ -171,6 +184,9 @@ int main(int argc, char *argv[])
 
         if (gpioInitialise() < 0)
                 return 1;
+
+	signal(SIGINT, handle_sigint);
+	signal(SIGTERM, handle_sigint);
 
 	//pi_mot.pwm_L = MOT_SPEED_L;
 	//pi_mot.pwm_R = MOT_SPEED_R;
@@ -196,14 +212,9 @@ int main(int argc, char *argv[])
 	renc1 = Pi_Renc(gpioA_L, gpioB_L, callback_L);
 	renc2 = Pi_Renc(gpioA_R, gpioB_R, callback_R);
 
-        while(1){
-                //fgets(buffer, sizeof(buffer), stdin);
-		//buffer[strcspn(buffer, "\n")] = 0; 
-		//wait_cmd(buffer);
-		listen_rx();
-		continue;
 
-        }
+	listen_rx();
+
 
 	close_udp_sender();
 	close_udp_listener();
@@ -220,7 +231,6 @@ int main(int argc, char *argv[])
  */
 int listen_rx()
 {
-        int running = 1;
         int event_count;
         int  fd_epoll;
         int i, ret;
@@ -391,6 +401,8 @@ uint16_t adj_pwm(struct pi_motors *pm)
 void set_lspeed(int spd)
 {
 
+	if (spd == pi_motL.t_speed)
+		return;
 	 pi_motL.pwm =(uint16_t)(abs(spd)*K_SPD);
 	 pi_motR.pwm =(uint16_t)(abs(spd)*K_SPD);
 	 pi_motL.t_speed = spd;

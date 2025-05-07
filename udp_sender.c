@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <sys/epoll.h>
 
+#define MULTICAST_IP "239.1.1.1"
 #define PORT 8080
 #define PORT2 8081
 #define BUFFER_SIZE 1024
@@ -16,7 +17,8 @@
 
 
 int sockfd, sockfd2;
-static struct sockaddr_in bcastaddr;
+//static struct sockaddr_in broadcast_addr;
+static struct sockaddr_in multicast_addr;
 static struct sockaddr_in listenaddr;
 static char buffer[BUFFER_SIZE];
 
@@ -52,7 +54,6 @@ int init_udp_listener()
 
 int init_udp_sender()
 {
-    
 
     // 1. Create UDP socket
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -60,20 +61,24 @@ int init_udp_sender()
         return(EXIT_FAILURE);
     }
 
+/*	struct in_addr localInterface;
+	localInterface.s_addr = inet_addr("10.10.50.142"); // replace with your IP
+	setsockopt(sockfd, IPPROTO_IP, IP_MULTICAST_IF, &localInterface, sizeof(localInterface));
+*/
+
     // 2. Enable broadcast option
-    int broadcastEnable = 1;
+    /*int broadcastEnable = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable)) < 0) {
         perror("Failed to set SO_BROADCAST");
         close(sockfd);
         return(EXIT_FAILURE);
-    }
+    }*/
 
     // 3. Setup broadcast address
-    memset(&bcastaddr, 0, sizeof(bcastaddr));
-    bcastaddr.sin_family = AF_INET;
-    bcastaddr.sin_port = htons(PORT);
-    bcastaddr.sin_addr.s_addr = inet_addr("10.10.50.255");  // or your subnet's broadcast IP like 192.168.1.255
-
+    memset(&multicast_addr, 0, sizeof(multicast_addr));
+    multicast_addr.sin_family = AF_INET;
+    multicast_addr.sin_port = htons(PORT);
+    multicast_addr.sin_addr.s_addr = inet_addr(MULTICAST_IP);
 
 
     return 0;
@@ -83,9 +88,9 @@ int send_udp_data(char *pstr)
 {
 
 	ssize_t sent = sendto(sockfd, pstr, strlen(pstr), 0,
-                              (struct sockaddr *)&bcastaddr, sizeof(bcastaddr));
+                              (struct sockaddr *)&multicast_addr, sizeof(multicast_addr));
         if (sent < 0) {
-            perror("Broadcast failed");
+            perror("sendto failed");
 	    return -1;
         } else {
             //printf("[SENT] %s\n", pstr);
