@@ -300,7 +300,7 @@ void send_mot_data()
 	char str[64];
 	static int cnt;
 
-	sprintf(str,"T:%d|LS:%.1f|RS:%.1f|L:%.1f|R:%.1f",
+	sprintf(str,"T:%d|LS:%.1f|RS:%.1f|L:%.1f|R:%.1f    ",
 		cnt,pi_motL.f_speed, pi_motR.f_speed, pi_motL.f_dist,pi_motR.f_dist);
         send_udp_data(str);
 	//printf("%s",str);
