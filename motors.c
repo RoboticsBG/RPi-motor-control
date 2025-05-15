@@ -7,15 +7,23 @@
 #include <sys/timerfd.h>
 #include <signal.h>
 #include "rotary_encoder.h"
-#include "udp_sender.h"
+#include "tcp_server.h"
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+
 
 #define MAX_PWM		1000
 #define PWM_FREQ	5000
 #define MOT_SPEED_L  	300
 #define MOT_SPEED_R  	300
 
-#define FWD		0
-#define BACK	  	1
+#define FWD_L		0
+#define FWD_R		1
+#define BACK_L	  	1
+#define BACK_R	  	0
 
 #define MDIV		11
 #define K_SPD		0.222F
@@ -42,9 +50,9 @@ int motor_timer = 0;
 
 int MPWM_L=12;
 int MPWM_R=13;
-int MDIR_L=24;
-int MDIR_R=25;
-int MEN=5;
+int MDIR_L=04;
+int MDIR_R=27;
+int MEN=24;
 
 int gpioA_L = 17;
 int gpioB_L = 18;
@@ -173,14 +181,14 @@ int main(int argc, char *argv[])
  	Pi_Renc_t *renc1, *renc2;
 
 
-	if (init_udp_sender() < 0){
+	if (init_tcp_server() < 0){
 		return 1;
 	}
 
-	if (init_udp_listener() < 0){
+/*	if (init_udp_listener() < 0){
 		return 1;
 	}
-
+*/
 
         if (gpioInitialise() < 0)
                 return 1;
@@ -207,23 +215,30 @@ int main(int argc, char *argv[])
         //gpioPWM(MPWM_R, 0);
 	gpioHardwarePWM(MPWM_L,PWM_FREQ,0);
 	gpioHardwarePWM(MPWM_R,PWM_FREQ,0);
-        gpioWrite(MEN, 0);
+        gpioWrite(MEN, 1);
 
 	renc1 = Pi_Renc(gpioA_L, gpioB_L, callback_L);
 	renc2 = Pi_Renc(gpioA_R, gpioB_R, callback_R);
 
+	//set_aspeed(1000);
+	//set_rspeed(1000);
+
 
 	listen_rx();
 
-
-	close_udp_sender();
-	close_udp_listener();
+	close_tcp_server();
+	//close_udp_sender();
+	//close_udp_listener();
 	Pi_Renc_cancel(renc1);
 	Pi_Renc_cancel(renc2);
+	set_pwm_L(0);
+        set_pwm_R(0);
 
         gpioTerminate();
 }
 
+int client_fds[MAX_CLIENTS] = {0};
+#define BUFFER_SIZE 256
 
 /**
  * @brief  The primary function that listens on CAN sockets.
@@ -234,11 +249,13 @@ int listen_rx()
         int event_count;
         int  fd_epoll;
         int i, ret;
-        int tfd;
+        int tfd, fd;
 	uint64_t expirations;
-	struct epoll_event event_setup[2], events[MAX_EVENTS];
 
-	char buffer[128];
+	//struct epoll_event event_setup[2], events[MAX_EVENTS];
+	struct epoll_event t_event, events[MAX_EVENTS];
+
+	char buffer[BUFFER_SIZE];
 
 	tfd = create_timerfd(100);  // fire every  100ms
 	if (tfd < 0)
@@ -251,19 +268,19 @@ int listen_rx()
                 return -2;
         }
 
-        event_setup[0].events = EPOLLIN;
-        event_setup[0].data.fd = sockfd2;
+        t_event.events = EPOLLIN;
+        t_event.data.fd = server_fd;
 
 
-        if (epoll_ctl(fd_epoll, EPOLL_CTL_ADD, sockfd2, &event_setup[0])) {
-                perror("failed to add UDP listen socket to epoll");
+        if (epoll_ctl(fd_epoll, EPOLL_CTL_ADD, server_fd, &t_event)) {
+                perror("failed to add TCP listen socket to epoll");
                 return -3;
         }
 
-	event_setup[1].events = EPOLLIN;
-        event_setup[1].data.fd = tfd;
+	t_event.events = EPOLLIN;
+        t_event.data.fd = tfd;
 
-        if (epoll_ctl(fd_epoll, EPOLL_CTL_ADD, tfd, &event_setup[1])) {
+        if (epoll_ctl(fd_epoll, EPOLL_CTL_ADD, tfd, &t_event)) {
                 perror("failed to add timerfd to epoll");
                 return -4;
         }
@@ -276,18 +293,57 @@ int listen_rx()
                         continue;
                 }
                 for(i = 0; i < event_count; i++){
+			fd = events[i].data.fd;
+             		if (fd  == server_fd) {
+				struct sockaddr_in client_addr;
+                		socklen_t addrlen = sizeof(client_addr);
+                		int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
 
-             		if (events[i].data.fd == sockfd2) {
-				ret = recv_data(buffer);
-				if (ret != 0){
-					continue;
-				}
-				proc_data(buffer);
+                		if (client_fd >= 0) {
+                    			set_nonblocking(client_fd);
+                    			t_event.events = EPOLLIN | EPOLLET;
+                    			t_event.data.fd = client_fd;
+                    			epoll_ctl(fd_epoll, EPOLL_CTL_ADD, client_fd, &t_event);
+
+                    			// Track client
+                    			for (int j = 0; j < MAX_CLIENTS; j++) {
+                        			if (client_fds[j] == 0) {
+                            				client_fds[j] = client_fd;
+                           			 	break;
+                       			 	}
+                    			}
+                    			printf("New connection from %s:%d\n",
+                           		inet_ntoa(client_addr.sin_addr),
+                           		ntohs(client_addr.sin_port));
+                		}
+
                 	}
-		        if (events[i].data.fd == tfd) {
+		        else if (fd == tfd) {
                 		read(tfd, &expirations, sizeof(expirations)); 
 				event_tick();
                 	}
+			else {
+                		// Data from client
+                		ssize_t r = read(fd, buffer, BUFFER_SIZE - 1);
+                		if (r <= 0) {
+                    			// Disconnect
+                    			printf("Client fd %d disconnected.\n", fd);
+                    			epoll_ctl(fd_epoll, EPOLL_CTL_DEL, fd, NULL);
+                    			close(fd);
+
+                    			for (int j = 0; j < MAX_CLIENTS; j++) {
+                        			if (client_fds[j] == fd) {
+                            				client_fds[j] = 0;
+                            				break;
+                        			}
+                    			}
+                		} else {
+                    			buffer[r] = '\0';
+                    			//printf("[Client %d] %s\n", fd, buffer);
+					proc_data(buffer);
+
+                		}
+            		}
 		}
 
         }
@@ -302,8 +358,15 @@ void send_mot_data()
 
 	sprintf(str,"T:%d|LS:%.1f|RS:%.1f|L:%.1f|R:%.1f    ",
 		cnt,pi_motL.f_speed, pi_motR.f_speed, pi_motL.f_dist,pi_motR.f_dist);
-        send_udp_data(str);
+        //send_udp_data(str);
 	//printf("%s",str);
+	// Broadcast to all clients
+        for (int j = 0; j < MAX_CLIENTS; j++) {
+        	if (client_fds[j] > 0) {
+                	send(client_fds[j], str, strlen(str), 0);
+                }
+        }
+
 	cnt ++;
 	if (cnt >= 100)
 		cnt = 0;
@@ -324,6 +387,7 @@ void event_tick()
 		pi_motL.f_speed =0.0;
 
 	}
+
 	send_mot_data();
 	//printf("1000ms tick\n");
 }
@@ -414,14 +478,14 @@ void set_lspeed(int spd)
 
 	if (spd>=0){
 
-		gpioWrite(MDIR_L, FWD);
-        	gpioWrite(MDIR_R, FWD);
+		gpioWrite(MDIR_L, FWD_L);
+        	gpioWrite(MDIR_R, FWD_R);
 		set_pwm_L(pi_motL.pwm);
 		set_pwm_R(pi_motR.pwm);
 	}
 	else{
-		gpioWrite(MDIR_L, BACK);
-        	gpioWrite(MDIR_R, BACK);
+		gpioWrite(MDIR_L, BACK_L);
+        	gpioWrite(MDIR_R, BACK_R);
 		set_pwm_L(pi_motL.pwm);
 		set_pwm_R(pi_motR.pwm);
 	}
@@ -440,15 +504,15 @@ void set_aspeed(int spd)
 
 	if (spd>=0){
 
-                gpioWrite(MDIR_L, BACK);
-                gpioWrite(MDIR_R, FWD);
+                gpioWrite(MDIR_L, BACK_L);
+                gpioWrite(MDIR_R, FWD_R);
                 set_pwm_L(pi_motL.pwm);
 		set_pwm_R(pi_motR.pwm);
 
         }
         else{
-                gpioWrite(MDIR_L, FWD);
-                gpioWrite(MDIR_R, BACK);
+                gpioWrite(MDIR_L, FWD_L);
+                gpioWrite(MDIR_R, BACK_R);
                 set_pwm_L(pi_motL.pwm);
 		set_pwm_R(pi_motR.pwm);
 

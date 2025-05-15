@@ -52,8 +52,8 @@ static void _cb(int gpio, int level, uint32_t tick, void *user)
       {
          delta = tick - renc->lastTick;
 	renc->lastTick = tick;
-	if (renc->levB) (renc->callback)(-1,delta);
-        else (renc->callback)(1,delta);
+	if (renc->levB) (renc->callback)(1,delta);
+        else (renc->callback)(-1,delta);
       }
      /* else if ((gpio == renc->gpioB) && (level == 1))
       {

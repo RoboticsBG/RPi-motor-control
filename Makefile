@@ -1,5 +1,5 @@
 EXEC = motors
-OBJS = motors.o rotary_encoder.o udp_sender.o
+OBJS = motors.o rotary_encoder.o tcp_server.o
 CC=gcc
 LDLIBS += -lpigpio
 
