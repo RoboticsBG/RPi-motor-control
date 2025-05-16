@@ -64,7 +64,7 @@ struct pi_motors pi_motL, pi_motR;
 
 volatile sig_atomic_t running = 1;
 
-void handle_sigint(int signum) 
+void handle_sigint(int signum)
 {
 	//printf("\nCaught signal %d, exiting cleanly...\n", signum);
     	running = 0;
