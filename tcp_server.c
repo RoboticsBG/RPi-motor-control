@@ -10,7 +10,7 @@
 #include <sys/types.h>
 #include <sys/epoll.h>
 
-#define PORT 9000
+#define PORT 8082
 #define MAX_EVENTS 64
 #define BUFFER_SIZE 1024
 
